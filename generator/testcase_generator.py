@@ -27,7 +27,7 @@ class TestcaseGenerator:
         self.style_samples = reader.extract_style_samples(max_samples=sample_count)
         return self
 
-    def generate_from_markdown(self, md_path: str, batch_size: int = 3) -> List[Dict]:
+    def generate_from_markdown(self, md_path: str, batch_size: int = 30) -> List[Dict]:
         """
         从Markdown测试点生成用例
 
@@ -53,7 +53,7 @@ class TestcaseGenerator:
             batch_size=batch_size
         )
 
-    def generate_from_xmind(self, xmind_path: str, batch_size: int = 3) -> List[Dict]:
+    def generate_from_xmind(self, xmind_path: str, batch_size: int = 30) -> List[Dict]:
         """
         从XMind测试点生成用例
 

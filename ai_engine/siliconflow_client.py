@@ -127,7 +127,7 @@ class SiliconFlowClient:
                 else:
                     raise Exception(f"请求失败，已重试{max_retries}次: {str(e)}")
 
-    def generate_testcases_batch(self, test_points: List[Dict], style_examples: str, batch_size: int = 3) -> List[Dict]:
+    def generate_testcases_batch(self, test_points: List[Dict], style_examples: str, batch_size: int = 30) -> List[Dict]:
         """分批生成测试用例，使用流式模式"""
         all_testcases = []
         total_batches = (len(test_points) + batch_size - 1) // batch_size
