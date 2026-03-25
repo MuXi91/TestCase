@@ -100,6 +100,31 @@ class MainWindow(QMainWindow):
         config_group.setLayout(config_layout)
         layout.addWidget(config_group)
 
+        # 类型选择
+        mode_select = QHBoxLayout()
+        mode_select.addWidget(QLabel('类型:'))
+        self.mode_select = QComboBox()
+        self.mode_select.addItems([
+            "活动",
+            "个人中心",
+            "battle",
+            "treasure",
+            "乐透",
+            "bingo",
+            "升级",
+            "盒柜",
+            "开盒",
+            "充值送",
+            "充值"
+        ])
+        mode_select.addWidget(self.mode_select)
+        mode_select.addStretch()
+        config_layout.addLayout(mode_select)
+
+        config_group.setLayout(config_layout)
+        layout.addWidget(config_group)
+
+
         # ===== 风格学习区域 =====
         style_group = QGroupBox("步骤1: 学习历史用例风格")
         style_layout = QHBoxLayout()
