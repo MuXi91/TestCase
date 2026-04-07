@@ -14,10 +14,24 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from ai_engine.siliconflow_client import SiliconFlowClient
+from ai_engine.claude_cli_client import ClaudeCLIClient
 # 导入项目模块
 from config import config
 from generator import TestcaseGenerator
 from exporter import ExcelExporter
+
+
+class ConnectionTestThread(QThread):
+    """连接测试线程"""
+    finished = pyqtSignal(bool, str)  # success, message
+
+    def __init__(self, client):
+        super().__init__()
+        self.client = client
+
+    def run(self):
+        success, message = self.client.test_connection()
+        self.finished.emit(success, message)
 
 
 class GeneratorThread(QThread):
@@ -26,26 +40,42 @@ class GeneratorThread(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, generator, test_point_file, file_type):
+    def __init__(self, generator, test_point_file, file_type, batch_size=5):
         super().__init__()
         self.generator = generator
         self.test_point_file = test_point_file
         self.file_type = file_type
+        self.batch_size = batch_size
+        # 用于收集进度消息
+        self._progress_messages = []
+
+    def _collect_progress(self, message: str):
+        """收集进度消息（线程安全，由 ClaudeCLIClient 调用）"""
+        self._progress_messages.append(message)
+        # 通过 signal 发送到主线程更新 UI
+        self.progress.emit(message)
 
     def run(self):
+        import traceback
         try:
             self.progress.emit("正在解析测试点...")
 
+            # 设置进度回调
+            if hasattr(self.generator, 'ai_client'):
+                self.generator.ai_client.progress_callback = self._collect_progress
+
             if self.file_type == 'markdown':
-                testcases = self.generator.generate_from_markdown(self.test_point_file)
+                testcases = self.generator.generate_from_markdown(self.test_point_file, batch_size=self.batch_size)
             else:
-                testcases = self.generator.generate_from_xmind(self.test_point_file)
+                testcases = self.generator.generate_from_xmind(self.test_point_file, batch_size=self.batch_size)
 
             self.progress.emit(f"生成完成，共 {len(testcases)} 条用例")
             self.finished.emit(testcases)
 
         except Exception as e:
-            self.error.emit(str(e))
+            error_detail = f"{str(e)}\n\n堆栈信息:\n{traceback.format_exc()[:1000]}"
+            self.progress.emit(f"❌ 发生错误: {str(e)}")
+            self.error.emit(error_detail)
 
 
 class MainWindow(QMainWindow):
@@ -75,18 +105,40 @@ class MainWindow(QMainWindow):
         config_group = QGroupBox("AI配置")
         config_layout = QVBoxLayout()
 
-        # API Key显示（脱敏）
+        # 后端选择
+        backend_layout = QHBoxLayout()
+        backend_layout.addWidget(QLabel("后端:"))
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItems(["SiliconFlow", "Claude CLI"])
+        self.backend_combo.currentTextChanged.connect(self.on_backend_changed)
+        backend_layout.addWidget(self.backend_combo)
+        backend_layout.addStretch()
+        config_layout.addLayout(backend_layout)
+
+        # Claude CLI 模型选择 - 仅Claude CLI时显示
+        claude_model_layout = QHBoxLayout()
+        self.claude_model_label = QLabel("CLI模型:")
+        claude_model_layout.addWidget(self.claude_model_label)
+        self.claude_model_combo = QComboBox()
+        self.claude_model_combo.addItems(["glm-5", "kimi-k2.5", "claude-sonnet-4-6", "claude-opus-4-6"])
+        claude_model_layout.addWidget(self.claude_model_combo)
+        claude_model_layout.addStretch()
+        config_layout.addLayout(claude_model_layout)
+
+        # API Key显示（脱敏）- 仅SiliconFlow时显示
         api_layout = QHBoxLayout()
-        api_layout.addWidget(QLabel("API Key:"))
+        self.api_key_label_title = QLabel("API Key:")
+        api_layout.addWidget(self.api_key_label_title)
         self.api_key_label = QLabel("从环境变量或~/.zshrc加载中...")
         self.api_key_label.setStyleSheet("color: green;")
         api_layout.addWidget(self.api_key_label)
         api_layout.addStretch()
         config_layout.addLayout(api_layout)
 
-        # 模型选择
+        # 模型选择 - 仅SiliconFlow时显示
         model_layout = QHBoxLayout()
-        model_layout.addWidget(QLabel("模型:"))
+        self.model_label = QLabel("模型:")
+        model_layout.addWidget(self.model_label)
         self.model_combo = QComboBox()
         self.model_combo.addItems([
             "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
@@ -101,25 +153,25 @@ class MainWindow(QMainWindow):
         layout.addWidget(config_group)
 
         # 类型选择
-        mode_select = QHBoxLayout()
-        mode_select.addWidget(QLabel('类型:'))
-        self.mode_select = QComboBox()
-        self.mode_select.addItems([
-            "活动",
-            "个人中心",
-            "battle",
-            "treasure",
-            "乐透",
-            "bingo",
-            "升级",
-            "盒柜",
-            "开盒",
-            "充值送",
-            "充值"
-        ])
-        mode_select.addWidget(self.mode_select)
-        mode_select.addStretch()
-        config_layout.addLayout(mode_select)
+        # mode_select = QHBoxLayout()
+        # mode_select.addWidget(QLabel('类型:'))
+        # self.mode_select = QComboBox()
+        # self.mode_select.addItems([
+        #     "活动",
+        #     "个人中心",
+        #     "battle",
+        #     "treasure",
+        #     "乐透",
+        #     "bingo",
+        #     "升级",
+        #     "盒柜",
+        #     "开盒",
+        #     "充值送",
+        #     "充值"
+        # ])
+        # mode_select.addWidget(self.mode_select)
+        # mode_select.addStretch()
+        # config_layout.addLayout(mode_select)
 
         config_group.setLayout(config_layout)
         layout.addWidget(config_group)
@@ -163,6 +215,14 @@ class MainWindow(QMainWindow):
         import_btn = QPushButton("浏览...")
         import_btn.clicked.connect(self.select_test_point_file)
         import_layout.addWidget(import_btn)
+
+        # 批次大小控制
+        import_layout.addWidget(QLabel("批次大小:"))
+        self.batch_spin = QSpinBox()
+        self.batch_spin.setRange(1, 20)
+        self.batch_spin.setValue(10)  # 默认5个测试点每批
+        self.batch_spin.setToolTip("每批处理的测试点数量，越小越稳定但速度慢")
+        import_layout.addWidget(self.batch_spin)
 
         import_group.setLayout(import_layout)
         layout.addWidget(import_group)
@@ -232,7 +292,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(preview_group)
 
     def init_ai_client(self):
-        """初始化AI客户端"""
+        """初始化AI客户端 - 默认使用SiliconFlow"""
         try:
             # 更新模型选择
             current_model = config.model
@@ -244,14 +304,14 @@ class MainWindow(QMainWindow):
             masked_key = config.api_key[:8] + "..." + config.api_key[-4:] if len(config.api_key) > 12 else "***"
             self.api_key_label.setText(f"已加载 ({masked_key})")
 
-            # 创建AI客户端
-            self.ai_client = SiliconFlowClient(
-                api_key=config.api_key,
-                model=config.model,
-                base_url=config.base_url
-            )
+            # 默认隐藏Claude CLI模型选择
+            self.claude_model_combo.setVisible(False)
+            self.claude_model_label.setVisible(False)
 
-            self.log("✅ AI客户端初始化成功")
+            # 创建AI客户端 - 默认SiliconFlow
+            self._init_siliconflow_client()
+
+            self.log("✅ AI客户端初始化成功 (SiliconFlow)")
 
         except Exception as e:
             self.api_key_label.setText("加载失败")
@@ -259,6 +319,76 @@ class MainWindow(QMainWindow):
             self.log(f"❌ 初始化失败: {str(e)}")
             QMessageBox.critical(self, "错误",
                                  f"API Key配置错误: {str(e)}\n\n请设置环境变量 SILICONFLOW_API_KEY\n或在 ~/.zshrc 中定义 aaaa 变量")
+
+    def on_backend_changed(self, backend: str):
+        """切换AI后端"""
+        if backend == "SiliconFlow":
+            # 显示SiliconFlow相关UI
+            self.model_combo.setVisible(True)
+            self.model_label.setVisible(True)
+            self.api_key_label.setVisible(True)
+            self.api_key_label_title.setVisible(True)
+            # 隐藏Claude CLI模型选择
+            self.claude_model_combo.setVisible(False)
+            self.claude_model_label.setVisible(False)
+            self._init_siliconflow_client()
+            self.log("✅ 已切换到 SiliconFlow 后端")
+        else:  # Claude CLI
+            # 隐藏SiliconFlow相关UI
+            self.model_combo.setVisible(False)
+            self.model_label.setVisible(False)
+            self.api_key_label.setVisible(False)
+            self.api_key_label_title.setVisible(False)
+            # 显示Claude CLI模型选择
+            self.claude_model_combo.setVisible(True)
+            self.claude_model_label.setVisible(True)
+            # 创建Claude CLI客户端
+            selected_model = self.claude_model_combo.currentText()
+            self.ai_client = ClaudeCLIClient(progress_callback=self.log, model=selected_model)
+
+            # 在后台线程测试连接，避免阻塞UI
+            self.log(f"正在测试 Claude CLI 连接 (模型: {selected_model})...")
+            self.connection_test_thread = ConnectionTestThread(self.ai_client)
+            self.connection_test_thread.finished.connect(self.on_connection_test_finished)
+            self.connection_test_thread.start()
+
+        # 切换后端后需要重新学习风格
+        self.generator = None
+        self.generate_btn.setEnabled(False)
+
+    def on_connection_test_finished(self, success: bool, message: str):
+        """连接测试完成回调"""
+        if success:
+            self.log(f"✅ {message}")
+            self.log(f"✅ 已切换到 Claude CLI 后端")
+        else:
+            self.log(f"❌ {message}")
+            self.log(f"❌ Claude CLI 连接失败，请检查配置")
+            QMessageBox.critical(self, "连接失败",
+                f"Claude CLI 连接测试失败\n\n"
+                f"错误: {message}\n\n"
+                f"请检查:\n"
+                f"1. 代理服务 192.168.2.1:3000 是否正常运行\n"
+                f"2. API Token 是否有效\n"
+                f"3. 模型是否支持")
+
+    def _init_siliconflow_client(self):
+        """初始化SiliconFlow客户端"""
+        try:
+            self.ai_client = SiliconFlowClient(
+                api_key=config.api_key,
+                model=self.model_combo.currentText(),
+                base_url=config.base_url
+            )
+            # 更新模型选择绑定
+            self.model_combo.currentTextChanged.connect(self._update_siliconflow_model)
+        except Exception as e:
+            raise Exception(f"SiliconFlow初始化失败: {str(e)}")
+
+    def _update_siliconflow_model(self, model: str):
+        """更新SiliconFlow模型"""
+        if hasattr(self, 'ai_client') and isinstance(self.ai_client, SiliconFlowClient):
+            self.ai_client.model = model
 
     def log(self, message):
         """添加日志"""
@@ -276,7 +406,7 @@ class MainWindow(QMainWindow):
         """选择测试点文件"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择测试点文件", "",
-            "Markdown文件 (*.md);;XMind文件 (*.xmind);;所有文件 (*)"
+            "所有文件 (*);;Markdown文件 (*.md);;XMind文件 (*.xmind)"
         )
         if file_path:
             self.test_point_path_edit.setText(file_path)
@@ -298,7 +428,7 @@ class MainWindow(QMainWindow):
             self.log("✅ 风格学习完成，可以生成测试用例了")
             self.generate_btn.setEnabled(True)
 
-            QMessageBox.information(self, "成功", "风格学习完成！")
+            # QMessageBox.information(self, "成功", "风格学习完成！")
 
         except Exception as e:
             self.log(f"❌ 学习失败: {str(e)}")
@@ -320,7 +450,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 0)  # 无限进度
 
         # 启动后台线程
-        self.thread = GeneratorThread(self.generator, test_point_file, file_type)
+        batch_size = self.batch_spin.value()
+        self.log(f"使用批次大小: {batch_size}")
+        self.thread = GeneratorThread(self.generator, test_point_file, file_type, batch_size)
         self.thread.progress.connect(self.log)
         self.thread.finished.connect(self.on_generation_finished)
         self.thread.error.connect(self.on_generation_error)

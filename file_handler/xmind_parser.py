@@ -2,7 +2,7 @@
 XMind格式测试点解析器 - 最终修复版
 彻底修复命名空间和子节点查找问题
 """
-
+import time
 import zipfile
 import json
 import xml.etree.ElementTree as ET
@@ -52,6 +52,19 @@ class XMindParser:
             points = self._parse_xml()
 
         print(f"[调试] XMind解析完成，共 {len(points)} 个测试点")
+        print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+
+        # 打印所有解析出的测试点
+        print("\n" + "=" * 60)
+        print("【XMind解析】测试点详情")
+        print("=" * 60)
+        for point in points:
+            indent = "  " * point['level']
+            leaf_mark = " 🍃" if point.get('is_leaf') else ""
+            module_info = f"[{point['module']}] " if point['module'] else ""
+            print(f"{indent}{module_info}{point['content']}{leaf_mark}")
+        print("=" * 60 + "\n")
+
         return points
 
     def _parse_json(self) -> List[Dict]:

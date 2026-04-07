@@ -8,6 +8,7 @@ import json
 import requests
 import time
 from typing import List, Dict, Optional, Generator
+from pathlib import Path
 
 
 class SiliconFlowClient:
@@ -32,6 +33,11 @@ class SiliconFlowClient:
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+
+        # 初始化时读取业务流程记忆（只读一次）
+        self.business_flow = self._load_business_flow()
+        if self.business_flow:
+            print(f"[DEBUG] SiliconFlow 已加载业务流程记忆，共 {len(self.business_flow)} 字符")
 
     def _normalize_model_name(self, model: str) -> str:
         if "/" in model:
@@ -127,7 +133,7 @@ class SiliconFlowClient:
                 else:
                     raise Exception(f"请求失败，已重试{max_retries}次: {str(e)}")
 
-    def generate_testcases_batch(self, test_points: List[Dict], style_examples: str, batch_size: int = 30) -> List[Dict]:
+    def generate_testcases_batch(self, test_points: List[Dict], style_examples: str, batch_size: int = 10) -> List[Dict]:
         """分批生成测试用例，使用流式模式"""
         all_testcases = []
         total_batches = (len(test_points) + batch_size - 1) // batch_size
@@ -155,57 +161,90 @@ class SiliconFlowClient:
         return all_testcases
 
     def _format_test_points(self, test_points: List[Dict]) -> str:
-        """格式化测试点"""
+        """格式化测试点 - 明确标注叶子节点数量"""
         sections = []
         current_module = ""
+
+        # 统计叶子节点数量
+        leaf_count = sum(1 for p in test_points if p.get('is_leaf'))
+
+        # 在开头明确告知叶子节点数量
+        sections.append(f"【本批测试点共 {leaf_count} 个叶子节点(🍃标记)，必须生成 {leaf_count} 条用例】")
 
         for point in test_points:
             module = point.get('module', '')
             feature = point.get('feature', '')
             content = point.get('content', '')
+            is_leaf = point.get('is_leaf', False)
 
             if module and module != current_module:
                 current_module = module
-                sections.append(f"\n【{current_module}】")
+                sections.append(f"\n【一级测试点: {current_module}】（所有用例的test_item必须是'{current_module}'）")
 
+            leaf_mark = " 🍃" if is_leaf else ""
             if feature:
-                sections.append(f"  - {feature}: {content}")
+                sections.append(f"  - {feature}: {content}{leaf_mark}")
             else:
-                sections.append(f"  - {content}")
+                sections.append(f"  - {content}{leaf_mark}")
 
         return "\n".join(sections)
 
+    def _load_business_flow(self) -> str:
+        """加载业务流程记忆文件"""
+        memory_path = Path.home() / ".claude/projects/-Users-mac-PycharmProjects/memory/business_flow.md"
+        if memory_path.exists():
+            try:
+                with open(memory_path, 'r') as f:
+                    return f.read()
+            except:
+                pass
+        return ""
+
     def _generate_single_batch(self, test_points_text: str, style_examples: str) -> List[Dict]:
         """生成单批测试用例"""
-        system_prompt = """你是一位资深软件测试专家，擅长将测试点转化为标准化的测试用例。
-请严格按照以下要求生成测试用例（核心要求）：
+        # 使用初始化时加载的业务流程记忆（不再重复读取）
+        business_flow = self.business_flow
 
-1. 用例标题必须以动词开头，明确预期结果，示例：打开、点击、输入、选择、删除、修改、查询、提交、验证等，必须清晰描述操作对象 + 操作行为，必须隐含 / 明确体现测试目的，禁止模糊描述，长度控制在 5–50 字，简洁无歧义，禁止使用疑问、感叹、描述性语句（强制！！！）
-2. 优先级分为：高（核心功能、主流程、必测场景、用户高频操作、影响主业务的功能）、中（重要功能、异常场景、边界值、必填项校验、提示信息）、低（UI 细节、边缘场景、极低频操作、非核心展示类内容）
-3. 前置条件必须是可执行的具体状态描述，必须具体、明确，禁止模糊、空话，多条前置条件必须分条描述，无前置条件时统一填写：无
-4. 测试步骤必须使用数字编号（1、2、3…），操作和数据分离，每一步只描述一个独立操作，步骤必须连贯、可复现
-5. 预期结果必须是可验证的断言，必须与测试步骤一一对应，必须明确：页面 / 提示 / 数据 / 状态变化，禁止使用 “应该正常”“可以使用” 等模糊描述
-6. XMind 中所有叶子节点测试点，必须 100% 转换为测试用例，不允许遗漏、合并、丢弃任何一条测试点，父节点作为【测试项】，子节点作为【用例内容】（最重要！！！）
+        system_prompt = """你是测试用例生成专家。将测试点转为标准测试用例。
 
-一句话总结：工具必须把 XMind 里每一条测试点，精准、完整、不遗漏地转换成一条符合企业标准的、可直接执行的正式测试用例。
+【绝对强制规则 - 违反即为错误】：
+1. **叶子节点(🍃标记)数量 = 用例数量，必须100%转换，一条都不能少！**
+   - 输入10个叶子节点，必须输出10条用例
+   - 输入63个叶子节点，必须输出63条用例
+2. **test_item必须等于一级测试点名称，禁止使用其他任何内容**
+   - 一级测试点是"新客流程优化"，所有用例test_item只能写"新客流程优化"
+   - 禁止使用二级、三级测试点作为test_item
+3. **只输出纯JSON数组，禁止输出任何其他文字**
+   - 禁止输出"根据测试点生成..."等开场白
+   - 禁止输出"共X条"等统计文字
+   - 直接以 [ 开头，以 ] 结尾
+4. **测试步骤data字段处理**
+   - 有数据时填写具体数据
+   - 无数据时data字段留空字符串""，禁止写"无"
 
-# 项目背景
-项目主要业务是开盲盒，用户充值后选择喜欢的盒子进行开盒，开盒结果是根据算法概率来的；
-其次还有很多小业务例如对战，用户选择盒子后付款然后选择和机器人或者真人进行对战，那方胜利可以对方开出的所有的物品加上胜利方开出的物品，输方将不会获得任何物品。项目主要应用市场在海外。
+JSON格式（严格遵守）：
+[
+  {"test_item":"新客流程优化","title":"用例标题","priority":"高/中/低","precondition":"前置条件","steps":[{"step_no":1,"action":"操作","data":""}],"expected_result":"预期结果"}
+]
 
-输出格式必须是JSON数组，每个元素包含：
-{
-    "test_item": "测试项",
-    "title": "用例标题",
-    "priority": "高/中/低",
-    "precondition": "前置条件",
-    "steps": [{"step_no": 1, "action": "操作", "data": "测试数据"}],
-    "expected_result": "预期结果"
-}
+立即输出JSON数组，不要任何开场白。"""
 
-只输出JSON，不要任何解释文字。"""
+        # 构建完整prompt，注入业务流程
+        if business_flow:
+            user_prompt = f"""{system_prompt}
 
-        user_prompt = f"""{system_prompt}
+【业务流程参考】
+{business_flow}
+
+【历史风格参考】
+{style_examples}
+
+【待转化测试点】
+{test_points_text}
+
+请根据业务流程参考中的步骤规则生成测试用例，每个测试点对应一条用例，以JSON格式返回。"""
+        else:
+            user_prompt = f"""{system_prompt}
 
 【历史风格参考】
 {style_examples}

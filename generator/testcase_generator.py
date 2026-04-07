@@ -3,15 +3,16 @@
 支持分批处理避免超时
 """
 
-from typing import List, Dict
+from typing import List, Dict, Union
 from ai_engine.siliconflow_client import SiliconFlowClient
+from ai_engine.claude_cli_client import ClaudeCLIClient
 from file_handler import ExcelReader, MarkdownParser, XMindParser
 
 
 class TestcaseGenerator:
     """测试用例生成器"""
 
-    def __init__(self, ai_client: SiliconFlowClient):
+    def __init__(self, ai_client: Union[SiliconFlowClient, ClaudeCLIClient]):
         self.ai_client = ai_client
         self.style_samples = ""
 
@@ -27,13 +28,13 @@ class TestcaseGenerator:
         self.style_samples = reader.extract_style_samples(max_samples=sample_count)
         return self
 
-    def generate_from_markdown(self, md_path: str, batch_size: int = 30) -> List[Dict]:
+    def generate_from_markdown(self, md_path: str, batch_size: int = 5) -> List[Dict]:
         """
         从Markdown测试点生成用例
 
         Args:
             md_path: Markdown文件路径
-            batch_size: 每批处理的测试点数量（建议3-5）
+            batch_size: 每批处理的测试点数量（建议3-5，越大越容易超时）
 
         Returns:
             生成的测试用例列表
@@ -53,13 +54,14 @@ class TestcaseGenerator:
             batch_size=batch_size
         )
 
-    def generate_from_xmind(self, xmind_path: str, batch_size: int = 30) -> List[Dict]:
+    def generate_from_xmind(self, xmind_path: str, batch_size: int = 5) -> List[Dict]:
         """
         从XMind测试点生成用例
 
         Args:
+
             xmind_path: XMind文件路径
-            batch_size: 每批处理的测试点数量（建议3-5）
+            batch_size: 每批处理的测试点数量（建议3-5，越大越容易超时）
 
         Returns:
             生成的测试用例列表
