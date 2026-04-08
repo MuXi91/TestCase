@@ -1,6 +1,6 @@
 """
-XMind格式测试点解析器 - 最终修复版
-彻底修复命名空间和子节点查找问题
+XMind格式测试点解析器 - 叶子节点版
+只统计叶子节点作为测试点数量，确保分批处理时测试用例数量与测试点数量一致
 """
 import time
 import zipfile
@@ -51,18 +51,18 @@ class XMindParser:
         else:
             points = self._parse_xml()
 
-        print(f"[调试] XMind解析完成，共 {len(points)} 个测试点")
+        print(f"[调试] XMind解析完成，共 {len(points)} 个测试点（仅叶子节点）")
         print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
         # 打印所有解析出的测试点
         print("\n" + "=" * 60)
-        print("【XMind解析】测试点详情")
+        print("【XMind解析】测试点详情（仅叶子节点）")
         print("=" * 60)
-        for point in points:
+        for i, point in enumerate(points, 1):
             indent = "  " * point['level']
-            leaf_mark = " 🍃" if point.get('is_leaf') else ""
             module_info = f"[{point['module']}] " if point['module'] else ""
-            print(f"{indent}{module_info}{point['content']}{leaf_mark}")
+            full_path = " → ".join(point.get('full_path', []))
+            print(f"{i}. {module_info}{full_path}")
         print("=" * 60 + "\n")
 
         return points
@@ -85,10 +85,13 @@ class XMindParser:
         self._traverse_json_topic(root_topic, test_points, level=0)
         return test_points
 
-    def _traverse_json_topic(self, topic: Dict, points: List[Dict], level: int, parent_module: str = ""):
-        """递归遍历JSON格式的topic"""
+    def _traverse_json_topic(self, topic: Dict, points: List[Dict], level: int, parent_module: str = "", parent_path: List[str] = None):
+        """递归遍历JSON格式的topic - 只收集叶子节点作为测试点"""
         if not topic:
             return
+
+        if parent_path is None:
+            parent_path = []
 
         title = topic.get('title', '')
         if not title:
@@ -98,30 +101,29 @@ class XMindParser:
         children = topic.get('children', {}).get('attached', []) if topic.get('children') else []
         is_leaf = len(children) == 0
 
-        # 层级判断
+        # 构建当前路径（用于叶子节点的完整层级信息）
+        current_path = parent_path + [title]
+
         if level == 0:
+            # 根节点作为模块名
             module = title
-            is_test_point = False
-        elif level == 1:
-            module = parent_module
-            is_test_point = True
         else:
             module = parent_module
-            is_test_point = True
 
-        # 添加测试点（level>=1或者是叶子节点）
-        if is_test_point:
+        # 只有叶子节点才添加到测试点列表
+        if is_leaf and level >= 1:
             points.append({
                 'module': module,
-                'feature': title if level == 1 else "",
+                'feature': parent_path[-1] if len(parent_path) >= 1 else "",
                 'content': title,
                 'level': level,
-                'is_leaf': is_leaf
+                'is_leaf': True,
+                'full_path': current_path  # 完整路径，方便后续使用
             })
 
         # 递归子主题
         for child in children:
-            self._traverse_json_topic(child, points, level + 1, module if level == 0 else parent_module)
+            self._traverse_json_topic(child, points, level + 1, module, current_path)
 
     def _parse_xml(self) -> List[Dict]:
         """解析XMind 8/Legacy (XML格式) - 最终修复版"""
@@ -219,10 +221,13 @@ class XMindParser:
 
         return children
 
-    def _traverse_xml_topic(self, topic, points: List[Dict], level: int, parent_module: str = ""):
-        """递归遍历XML格式的topic - 最终修复版"""
+    def _traverse_xml_topic(self, topic, points: List[Dict], level: int, parent_module: str = "", parent_path: List[str] = None):
+        """递归遍历XML格式的topic - 只收集叶子节点作为测试点"""
         if topic is None:
             return
+
+        if parent_path is None:
+            parent_path = []
 
         title = self._get_text(topic, 'title')
         if not title:
@@ -232,31 +237,29 @@ class XMindParser:
         children = self._get_children_topics(topic)
         is_leaf = len(children) == 0
 
-        # 层级判断
+        # 构建当前路径（用于叶子节点的完整层级信息）
+        current_path = parent_path + [title]
+
         if level == 0:
+            # 根节点作为模块名
             module = title
-            is_test_point = False
-        elif level == 1:
-            module = parent_module
-            is_test_point = True
         else:
             module = parent_module
-            is_test_point = True
 
-        # 添加测试点
-        if is_test_point:
+        # 只有叶子节点才添加到测试点列表
+        if is_leaf and level >= 1:
             points.append({
                 'module': module,
-                'feature': title if level == 1 else "",
+                'feature': parent_path[-1] if len(parent_path) >= 1 else "",
                 'content': title,
                 'level': level,
-                'is_leaf': is_leaf
+                'is_leaf': True,
+                'full_path': current_path  # 完整路径，方便后续使用
             })
 
         # 递归处理直接子节点
         for child in children:
-            next_module = title if level == 0 else parent_module
-            self._traverse_xml_topic(child, points, level + 1, next_module)
+            self._traverse_xml_topic(child, points, level + 1, module, current_path)
 
     def to_text(self) -> str:
         """转换为纯文本格式"""
@@ -273,8 +276,7 @@ class XMindParser:
                 current_module = point['module']
                 sections.append(f"\n【{current_module}】")
 
-            indent = "  " * point['level']
-            leaf_mark = " 🍃" if point.get('is_leaf') else ""
-            sections.append(f"{indent}- {point['content']}{leaf_mark}")
+            full_path = point.get('full_path', [point['content']])
+            sections.append(f"  - {' → '.join(full_path)}")
 
         return "\n".join(sections)
