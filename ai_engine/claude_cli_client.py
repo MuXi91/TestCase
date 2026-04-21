@@ -433,6 +433,27 @@ JSON格式：
 
         text = text.strip()
 
+        # 修复AI返回JSON中未转义的换行符（precondition等字段常包含真实换行）
+        # 将JSON字符串值内的真实换行替换为\\n
+        # 只替换双引号内的换行，不影响JSON结构本身的换行
+        fixed_text = ""
+        in_string = False
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch == '"' and (i == 0 or text[i-1] != '\\'):
+                in_string = not in_string
+                fixed_text += ch
+            elif ch == '\n' and in_string:
+                fixed_text += '\\n'
+            elif ch == '\r' and in_string:
+                # 跳过字符串内的\r
+                pass
+            else:
+                fixed_text += ch
+            i += 1
+        text = fixed_text
+
         # 尝试直接解析
         try:
             result = json.loads(text)
