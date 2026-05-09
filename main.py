@@ -493,8 +493,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "没有可导出的测试用例")
             return
 
+        default_path = os.path.join(str(Path.home()), "Desktop", "测试用例.xlsx")
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存测试用例", "测试用例.xlsx", "Excel文件 (*.xlsx)"
+            self, "保存测试用例", default_path, "Excel文件 (*.xlsx)"
         )
 
         if not file_path:
