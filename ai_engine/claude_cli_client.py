@@ -52,6 +52,7 @@ class ClaudeCLIClient:
     SUPPORTED_MODELS = [
         "glm-5",
         "kimi-k2.5",
+        "gpt-5.5",
         "claude-opus-4-6",
         "claude-sonnet-4-6"
     ]

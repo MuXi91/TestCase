@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         self.claude_model_label = QLabel("CLI模型:")
         claude_model_layout.addWidget(self.claude_model_label)
         self.claude_model_combo = QComboBox()
-        self.claude_model_combo.addItems(["glm-5", "kimi-k2.5", "claude-sonnet-4-6", "claude-opus-4-6"])
+        self.claude_model_combo.addItems(["glm-5", "kimi-k2.5", "gpt-5.5", "claude-sonnet-4-6", "claude-opus-4-6"])
         claude_model_layout.addWidget(self.claude_model_combo)
         claude_model_layout.addStretch()
         config_layout.addLayout(claude_model_layout)
