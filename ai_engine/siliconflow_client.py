@@ -11,6 +11,21 @@ from typing import List, Dict, Optional, Generator
 from pathlib import Path
 
 
+def _load_testcase_skill() -> str:
+    skill_path = Path(__file__).resolve().parents[1] / "claude" / "skills" / "testcase.md"
+    content = skill_path.read_text(encoding="utf-8")
+    if not content.startswith("---\n"):
+        raise ValueError(f"测试用例规则文件缺少有效 YAML frontmatter: {skill_path}")
+
+    _, separator, body = content[4:].partition("\n---\n")
+    if not separator:
+        raise ValueError(f"测试用例规则文件 YAML frontmatter 未闭合: {skill_path}")
+    body = body.strip()
+    if not body:
+        raise ValueError(f"测试用例规则文件正文为空: {skill_path}")
+    return body
+
+
 class SiliconFlowClient:
     """SiliconFlow API客户端 - 流式版本"""
 
@@ -147,6 +162,11 @@ class SiliconFlowClient:
 
             try:
                 batch_cases = self._generate_single_batch(batch_text, style_examples)
+                priority_mapping = {"P0": "高", "P1": "中", "P2": "中", "P3": "低"}
+                if len(batch_cases) == len(batch):
+                    for point, testcase in zip(batch, batch_cases):
+                        if point.get('priority') in priority_mapping:
+                            testcase['priority'] = priority_mapping[point['priority']]
                 all_testcases.extend(batch_cases)
                 print(f"  ✓ 本批生成 {len(batch_cases)} 条用例")
 
@@ -175,6 +195,7 @@ class SiliconFlowClient:
             module = point.get('module', '')
             feature = point.get('feature', '')
             content = point.get('content', '')
+            priority = point.get('priority', '')
             is_leaf = point.get('is_leaf', False)
 
             if module and module != current_module:
@@ -182,10 +203,11 @@ class SiliconFlowClient:
                 sections.append(f"\n【一级测试点: {current_module}】（所有用例的test_item必须是'{current_module}'）")
 
             leaf_mark = " 🍃" if is_leaf else ""
+            priority_mark = f" 【指定优先级: {priority}】" if priority else ""
             if feature:
-                sections.append(f"  - {feature}: {content}{leaf_mark}")
+                sections.append(f"  - {feature}: {content}{priority_mark}{leaf_mark}")
             else:
-                sections.append(f"  - {content}{leaf_mark}")
+                sections.append(f"  - {content}{priority_mark}{leaf_mark}")
 
         return "\n".join(sections)
 
@@ -205,29 +227,7 @@ class SiliconFlowClient:
         # 使用初始化时加载的业务流程记忆（不再重复读取）
         business_flow = self.business_flow
 
-        system_prompt = """你是测试用例生成专家。将测试点转为标准测试用例。
-
-【绝对强制规则 - 违反即为错误】：
-1. **叶子节点(🍃标记)数量 = 用例数量，必须100%转换，一条都不能少！**
-   - 输入10个叶子节点，必须输出10条用例
-   - 输入63个叶子节点，必须输出63条用例
-2. **test_item必须等于一级测试点名称，禁止使用其他任何内容**
-   - 一级测试点是"新客流程优化"，所有用例test_item只能写"新客流程优化"
-   - 禁止使用二级、三级测试点作为test_item
-3. **只输出纯JSON数组，禁止输出任何其他文字**
-   - 禁止输出"根据测试点生成..."等开场白
-   - 禁止输出"共X条"等统计文字
-   - 直接以 [ 开头，以 ] 结尾
-4. **测试步骤data字段处理**
-   - 有数据时填写具体数据
-   - 无数据时data字段留空字符串""，禁止写"无"
-
-JSON格式（严格遵守）：
-[
-  {"test_item":"新客流程优化","title":"用例标题","priority":"高/中/低","precondition":"前置条件","steps":[{"step_no":1,"action":"操作","data":""}],"expected_result":"预期结果"}
-]
-
-立即输出JSON数组，不要任何开场白。"""
+        system_prompt = _load_testcase_skill()
 
         # 构建完整prompt，注入业务流程
         if business_flow:

@@ -52,14 +52,21 @@ class MarkdownParser:
                 # 测试点项
                 content = re.sub(r'^[-*\d.]\s*', '', line).strip()
                 if content:
+                    priority = self._extract_priority(content)
                     test_points.append({
                         'module': current_module,
                         'feature': current_feature,
                         'content': content,
-                        'level': self._get_level(line)
+                        'level': self._get_level(line),
+                        'priority': priority
                     })
 
         return test_points
+
+    def _extract_priority(self, content: str) -> str:
+        """提取测试点中明确标注的 P0-P3 优先级。"""
+        match = re.search(r'(?i)(?<![a-z0-9])p([0-3])(?![a-z0-9])', content)
+        return f"P{match.group(1)}" if match else ""
 
     def _get_level(self, line: str) -> int:
         """获取缩进层级"""

@@ -20,3 +20,6 @@ pip install -r requirements.txt
 2. **Parse Test Points**: `.md` or `.xmind` file → Parser → `List[Dict]` with keys: `module`, `feature`, `content`, `level`
 3. **Generate**: Test points + style samples → `SiliconFlowClient.generate_testcases_batch()` → JSON test cases
 4. **Export**: `List[Dict]` test cases → `ExcelExporter.export()` → `.xlsx` file
+## 必须遵循规则！！！
+1. 不准擅自更改我需求之外的代码
+2. 不准读取整个项目文件，除非我要求你读取，平时只能读取和需求相关的文件

@@ -14,6 +14,12 @@ from typing import List, Dict
 class XMindParser:
     """XMind测试点解析类 - 最终修复版"""
 
+    @staticmethod
+    def _extract_priority(title: str) -> str:
+        """提取主题标题中明确标注的 P0-P3 优先级。"""
+        match = re.search(r'(?i)(?<![a-z0-9])p([0-3])(?![a-z0-9])', title)
+        return f"P{match.group(1)}" if match else ""
+
     def __init__(self, file_path: str):
         self.file_path = Path(file_path)
         self.content = None
@@ -117,6 +123,7 @@ class XMindParser:
                 'feature': parent_path[-1] if len(parent_path) >= 1 else "",
                 'content': title,
                 'level': level,
+                'priority': self._extract_priority(title),
                 'is_leaf': True,
                 'full_path': current_path  # 完整路径，方便后续使用
             })
@@ -253,6 +260,7 @@ class XMindParser:
                 'feature': parent_path[-1] if len(parent_path) >= 1 else "",
                 'content': title,
                 'level': level,
+                'priority': self._extract_priority(title),
                 'is_leaf': True,
                 'full_path': current_path  # 完整路径，方便后续使用
             })
